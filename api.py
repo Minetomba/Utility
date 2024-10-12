@@ -1,8 +1,11 @@
-import base64
 import sys
 import subprocess
 operating = sys.platform
+import os
+import base64
+
 ENCODING = 'utf-8'
+
 class Cryptography:
     def encode(message):
         binary_message = ''.join(format(ord(char), '08b') for char in message)
@@ -12,15 +15,91 @@ class Cryptography:
         reversed_message = binary_base64[::-1]
         encrypted_message = f"s+{reversed_message}="
         return encrypted_message
+
     def decode(encrypted_message):
         if encrypted_message.startswith("s+") and encrypted_message.endswith("="):
             reversed_message = encrypted_message[2:-1][::-1]
             binary_base64 = ''.join(chr(int(reversed_message[i:i+8], 2)) for i in range(0, len(reversed_message), 8))
-            decoded_base64 = base64.b64decode(binary_base64).decode(ENCODING)
-            binary_message = bin(int(decoded_base64, 16))[2:].zfill(len(decoded_base64) * 4)
+            decoded_base64 = base64.b64decode(binary_base64)
+            binary_message = ''.join(format(byte, '08b') for byte in decoded_base64)
             original_message = ''.join(chr(int(binary_message[i:i+8], 2)) for i in range(0, len(binary_message), 8))
             return original_message
         return None
+
+import os
+
+class Backup:
+    def create(dir_path):
+        """Creates a text file containing the directory structure and contents."""
+        dir_path = os.path.abspath(dir_path)
+        structure_file = os.path.join(os.getcwd(), 'directory_structure.txt')
+
+        with open(structure_file, 'w', encoding='utf-8') as file:
+            Backup._write_directory_structure(dir_path, file)
+        
+        print(f'Directory structure saved to {structure_file}')
+
+    @staticmethod
+    def _write_directory_structure(current_path, file, indent_level=0):
+        """Recursive helper method to write the directory structure to a file."""
+        indent = '    ' * indent_level  # Indentation for better readability
+        for entry in os.listdir(current_path):
+            entry_path = os.path.join(current_path, entry)
+            relative_path = os.path.relpath(entry_path, os.getcwd())
+            file.write(f"{indent}{relative_path}\n")  # Write the path relative to current working directory
+            
+            if os.path.isdir(entry_path):
+                Backup._write_directory_structure(entry_path, file, indent_level + 1)
+            elif os.path.isfile(entry_path):
+                file.write(f"{indent}    CONTENT:\n")  # Indicate content starts
+                with open(entry_path, 'r', encoding='utf-8') as subfile:
+                    content = subfile.read()
+                    file.write(f"{indent}    {content}\n")  # Write the file content
+
+    def restore(structure_file):
+        """Restores the directory structure and contents from the specified text file."""
+        with open(structure_file, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        current_path = os.getcwd()
+        i = 0
+        while i < len(lines):
+            stripped_line = lines[i].strip()
+            if not stripped_line:
+                i += 1
+                continue
+
+            indent_level = (len(lines[i]) - len(stripped_line)) // 4  # Calculate the indent level
+            relative_path = stripped_line
+            
+            # Create the full path
+            if indent_level == 0:
+                current_path = os.path.join(os.getcwd(), relative_path)
+                os.makedirs(current_path, exist_ok=True)  # Create the directory
+            else:
+                # For files, get the previous directory path
+                parent_dir = os.path.dirname(current_path)
+                file_path = os.path.join(parent_dir, relative_path)
+
+                # Check if the next line is CONTENT
+                if lines[i].startswith("    CONTENT:"):
+                    content_lines = []
+                    i += 1  # Move to the next line after CONTENT
+                    while i < len(lines) and (lines[i].startswith("    ") or not lines[i].strip()):
+                        if lines[i].strip() and not lines[i].strip().startswith("CONTENT:"):  # Avoid "CONTENT:"
+                            content_lines.append(lines[i].strip())
+                        i += 1
+                    
+                    # Write content to the file
+                    if content_lines:  # Only write if there is content
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write("\n".join(content_lines))
+                    # Adjust index back since the outer loop will also increment i
+                    continue
+            
+            i += 1  # Move to the next line if no CONTENT found
+
+        print(f'Directory structure restored from {structure_file}')
 class OSLinker:
     def system(command, output):
         try:
@@ -61,46 +140,6 @@ class OSLinker:
         except Exception as e:
             print(f"Error occured: {e}")
             return str(e)
-import os
-import json
-
-class Backup:
-    def create(source_path, backup_file):
-        if not os.path.exists(source_path):
-            print(f"Source path {source_path} does not exist.")
-            return
-        backup_data = {}
-        for root, _, files in os.walk(source_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding=ENCODING) as f:
-                        content = f.read()
-                    encrypted_content = Cryptography.encode(content)
-                    backup_data[file_path] = encrypted_content
-                except Exception as e:
-                    print(f"Error reading {file_path}: {e}")
-        with open(backup_file, 'w', encoding='utf-8') as f:
-            json.dump(backup_data, f)
-        print(f"Backup created successfully at {backup_file}.")
-    def restore(backup_file, restore_path):
-        if not os.path.exists(backup_file):
-            print(f"Backup file {backup_file} does not exist.")
-            return
-        with open(backup_file, 'r', encoding='utf-8') as f:
-            backup_data = json.load(f)
-        os.makedirs(restore_path, exist_ok=True)
-        for file_path, encrypted_content in backup_data.items():
-            try:
-                decrypted_content = Cryptography.decode(encrypted_content)
-                relative_path = os.path.relpath(file_path, start=os.path.dirname(backup_file))
-                restored_file_path = os.path.join(restore_path, relative_path)
-                os.makedirs(os.path.dirname(restored_file_path), exist_ok=True)
-                with open(restored_file_path, 'w', encoding=ENCODING) as f:
-                    f.write(decrypted_content)
-                print(f"Restored {restored_file_path}.")
-            except Exception as e:
-                print(f"Error restoring {file_path}: {e}")
 class Utility:
     # Fix email verification function
     @staticmethod
